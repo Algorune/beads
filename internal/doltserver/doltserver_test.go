@@ -1,6 +1,7 @@
 package doltserver
 
 import (
+	"context"
 	"net"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/steveyegge/beads/internal/config"
 	"github.com/steveyegge/beads/internal/configfile"
@@ -641,6 +643,67 @@ func TestKillStaleServersWithoutCanonicalPIDOnlyKillsOwnedDir(t *testing.T) {
 	}
 	if len(killed) != 1 || killed[0] != sameRepoOrphanPID {
 		t.Fatalf("kill callback got %v, want [%d]", killed, sameRepoOrphanPID)
+	}
+}
+
+func TestEnsureRunningDetailed_ExplicitPortSuppressesAutostart(t *testing.T) {
+	t.Setenv("GT_ROOT", "")
+
+	beadsDir := t.TempDir()
+	cfg := &configfile.Config{
+		Backend:        configfile.BackendDolt,
+		Database:       "dolt",
+		DoltMode:       configfile.DoltModeServer,
+		DoltServerHost: "127.0.0.1",
+		DoltServerPort: 15432,
+		DoltDatabase:   "external_db",
+	}
+	if err := cfg.Save(beadsDir); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	port, startedByUs, err := EnsureRunningDetailed(beadsDir)
+	if err == nil {
+		t.Fatal("expected EnsureRunningDetailed to fail when explicit server port is configured")
+	}
+	if port != 0 {
+		t.Fatalf("port = %d, want 0", port)
+	}
+	if startedByUs {
+		t.Fatal("startedByUs = true, want false")
+	}
+	if !strings.Contains(err.Error(), "auto-start is suppressed") {
+		t.Fatalf("expected explicit-port suppression error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "port 15432") {
+		t.Fatalf("expected configured port in error, got: %v", err)
+	}
+	if _, statErr := os.Stat(pidPath(beadsDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no pid file, got err=%v", statErr)
+	}
+	if _, statErr := os.Stat(portPath(beadsDir)); !os.IsNotExist(statErr) {
+		t.Fatalf("expected no port file, got err=%v", statErr)
+	}
+}
+
+func TestProcessInspectionTimeoutsReturnSafeDefaults(t *testing.T) {
+	oldRun := runProcessCommand
+	runProcessCommand = func(timeout time.Duration, name string, args ...string) ([]byte, error) {
+		if timeout != processInspectionTimeout {
+			t.Fatalf("timeout = %v, want %v", timeout, processInspectionTimeout)
+		}
+		return nil, context.DeadlineExceeded
+	}
+	t.Cleanup(func() { runProcessCommand = oldRun })
+
+	if pid := findPIDOnPort(3306); pid != 0 {
+		t.Fatalf("findPIDOnPort() = %d, want 0 on timeout", pid)
+	}
+	if got := listDoltProcessPIDs(); len(got) != 0 {
+		t.Fatalf("listDoltProcessPIDs() = %v, want empty on timeout", got)
+	}
+	if isProcessInDir(os.Getpid(), t.TempDir()) {
+		t.Fatal("isProcessInDir() = true, want false on timeout")
 	}
 }
 

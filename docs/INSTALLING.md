@@ -19,6 +19,8 @@ Beads has several components - here's what they are and when you need them:
 
 **Important:** Beads is installed system-wide, not cloned into your project. The `.beads/` directory in your project only contains the issue database.
 
+**Maintainer note:** The package-manager and `go install` commands below are end-user installation paths. If you're actively developing inside a Beads checkout, prefer `make install` from that clone instead of keeping a hand-built repo-local binary around.
+
 **Typical setups:**
 
 | Environment | What to Install |
@@ -147,8 +149,7 @@ go install github.com/steveyegge/beads/cmd/bd@latest
 ```bash
 git clone https://github.com/steveyegge/beads
 cd beads
-go build -o bd ./cmd/bd
-sudo mv bd /usr/local/bin/
+make install
 ```
 
 ### Linux
@@ -177,8 +178,7 @@ go install github.com/steveyegge/beads/cmd/bd@latest
 ```bash
 git clone https://github.com/steveyegge/beads
 cd beads
-go build -o bd ./cmd/bd
-sudo mv bd /usr/local/bin/
+make install
 ```
 
 ### FreeBSD
@@ -216,6 +216,9 @@ go install github.com/steveyegge/beads/cmd/bd@latest
 ```
 
 ICU is **not required** on Windows. The regex backend uses pure Go automatically.
+If you see `unicode/uregex.h` in the supported Windows path, you are on a stale
+or unsupported build flow; switch back to `make build`, `go install`, or the
+PowerShell installer instead of chasing ICU headers.
 
 **From source**:
 ```pwsh
@@ -432,8 +435,7 @@ CGO_ENABLED=1 go install github.com/steveyegge/beads/cmd/bd@latest
 # Or if building from source
 git clone https://github.com/steveyegge/beads
 cd beads
-CGO_ENABLED=1 go build -o bd ./cmd/bd
-sudo mv bd /usr/local/bin/
+CGO_ENABLED=1 make install
 ```
 
 If you installed via Homebrew, this shouldn't be necessary as the formula already enables CGO. If you're still seeing crashes with the Homebrew version, please [file an issue](https://github.com/steveyegge/beads/issues).
@@ -517,8 +519,7 @@ go install github.com/steveyegge/beads/cmd/bd@latest
 ```bash
 cd beads
 git pull
-go build -o bd ./cmd/bd
-sudo mv bd /usr/local/bin/
+make install
 ```
 
 ## After Upgrading (Recommended)

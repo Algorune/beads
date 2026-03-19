@@ -20,7 +20,7 @@ func FixMissingMetadata(path string, bdVersion string) error {
 		return err
 	}
 
-	info, err := resolveRuntimeInfoForRepo(path)
+	info, err := resolveFixRuntimeInfoForRepo(path)
 	if err != nil {
 		return nil // Can't load config, nothing to fix
 	}
@@ -100,7 +100,7 @@ func FixProjectIdentity(path string) error {
 		return err
 	}
 
-	info, err := resolveRuntimeInfoForRepo(path)
+	info, err := resolveFixRuntimeInfoForRepo(path)
 	if err != nil {
 		return fmt.Errorf("failed to load metadata.json: %w", err)
 	}
@@ -171,7 +171,7 @@ func FixMissingDoltDatabase(path string) error {
 		return err
 	}
 
-	info, err := resolveRuntimeInfoForRepo(path)
+	info, err := resolveFixRuntimeInfoForRepo(path)
 	if err != nil {
 		return nil // No config, nothing to fix
 	}

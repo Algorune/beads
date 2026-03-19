@@ -79,33 +79,6 @@ func isDockerAvailable() bool {
 	return dockerAvail
 }
 
-// hasTestSkip returns true if the given service appears in the BEADS_TEST_SKIP
-// env var (comma-separated list). Example: BEADS_TEST_SKIP=dolt,slow
-func hasTestSkip(service string) bool {
-	val := os.Getenv("BEADS_TEST_SKIP")
-	if val == "" {
-		return false
-	}
-	for _, s := range strings.Split(val, ",") {
-		if strings.TrimSpace(s) == service {
-			return true
-		}
-	}
-	return false
-}
-
-// RequireDoltCLI skips the test when the host dolt CLI is unavailable or the
-// shared Dolt test skip contract is active via BEADS_TEST_SKIP=dolt.
-func RequireDoltCLI(t *testing.T) {
-	t.Helper()
-	if hasTestSkip("dolt") {
-		t.Skip("skipping test: Dolt tests skipped (BEADS_TEST_SKIP=dolt)")
-	}
-	if _, err := exec.LookPath("dolt"); err != nil {
-		t.Skip("skipping test: dolt CLI not found on PATH")
-	}
-}
-
 // checkDolt returns the readiness state for Dolt integration tests.
 // It composes hasTestSkip, isDockerAvailable, isDoltImageCached, and
 // isDoltRepoImageCached, caching the result.
@@ -168,9 +141,18 @@ func startDoltContainer() error {
 		return fmt.Errorf("getting mapped port: %w", err)
 	}
 
-	if _, err := strconv.Atoi(p.Port()); err != nil {
+	parsedPort, err := strconv.Atoi(p.Port())
+	if err != nil {
 		_ = testcontainers.TerminateContainer(ctr)
 		return fmt.Errorf("parsing port %q: %w", p.Port(), err)
+	}
+	if !WaitForServer(parsedPort, serverStartTimeout) {
+		_ = testcontainers.TerminateContainer(ctr)
+		return fmt.Errorf("waiting for Dolt server on 127.0.0.1:%d: timed out after %s", parsedPort, serverStartTimeout)
+	}
+	if err := WaitForSQLServer(parsedPort, serverStartTimeout); err != nil {
+		_ = testcontainers.TerminateContainer(ctr)
+		return err
 	}
 
 	doltTestPort = p.Port()
@@ -221,6 +203,16 @@ func StartIsolatedDoltContainer(t *testing.T) string {
 	}
 
 	portStr := port.Port()
+	portInt, err := strconv.Atoi(portStr)
+	if err != nil {
+		t.Fatalf("parsing mapped port %q: %v", portStr, err)
+	}
+	if !WaitForServer(portInt, serverStartTimeout) {
+		t.Fatalf("waiting for Dolt server on 127.0.0.1:%d timed out after %s", portInt, serverStartTimeout)
+	}
+	if err := WaitForSQLServer(portInt, serverStartTimeout); err != nil {
+		t.Fatalf("%v", err)
+	}
 	t.Setenv("BEADS_DOLT_PORT", portStr)
 	return portStr
 }
