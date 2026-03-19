@@ -37,6 +37,12 @@ var (
 	bdDir  string
 	bdOnce sync.Once
 	bdErr  error
+
+	// The protocol package intentionally runs many CLI round-trip tests in
+	// parallel, but their initial `bd init` calls all hit the same shared test
+	// Dolt server. Serializing just the bootstrap step avoids schema-init and
+	// migration races while keeping the post-init assertions parallel.
+	workspaceInitMu sync.Mutex
 )
 
 // testDoltPort is set by TestMain when a test Dolt server is available.
@@ -163,6 +169,9 @@ func newWorkspace(t *testing.T) *workspace {
 	if _, err := exec.LookPath("dolt"); err != nil {
 		t.Skip("skipping: dolt not installed")
 	}
+	if testDoltPort == 0 {
+		t.Skip("skipping: test Dolt server not available")
+	}
 	bd := buildBD(t)
 	dir := t.TempDir()
 	w := &workspace{dir: dir, bd: bd, t: t}
@@ -178,6 +187,8 @@ func newWorkspace(t *testing.T) *workspace {
 	w.git("commit", "-m", "initial")
 
 	prefix := testPrefix(t)
+	workspaceInitMu.Lock()
+	defer workspaceInitMu.Unlock()
 	w.run("init", "--prefix", prefix, "--quiet")
 	return w
 }
@@ -186,7 +197,6 @@ func (w *workspace) env() []string {
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + w.dir,
-		"BEADS_NO_DAEMON=1",
 		"GIT_CONFIG_NOSYSTEM=1",
 		"BEADS_TEST_MODE=1",
 	}

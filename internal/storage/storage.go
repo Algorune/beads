@@ -7,6 +7,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -66,7 +67,7 @@ type Storage interface {
 	AddIssueComment(ctx context.Context, issueID, author, text string) (*types.Comment, error)
 	GetIssueComments(ctx context.Context, issueID string) ([]*types.Comment, error)
 	GetEvents(ctx context.Context, issueID string, limit int) ([]*types.Event, error)
-	GetAllEventsSince(ctx context.Context, sinceID int64) ([]*types.Event, error)
+	GetAllEventsSince(ctx context.Context, since time.Time) ([]*types.Event, error)
 
 	// Statistics
 	GetStatistics(ctx context.Context) (*types.Statistics, error)
@@ -81,6 +82,49 @@ type Storage interface {
 
 	// Lifecycle
 	Close() error
+}
+
+// DoltStorage is the full interface for Dolt-backed stores, composing the core
+// Storage interface with all capability sub-interfaces. Both DoltStore and
+// EmbeddedDoltStore satisfy this interface.
+type DoltStorage interface {
+	Storage
+	VersionControl
+	HistoryViewer
+	RemoteStore
+	SyncStore
+	FederationStore
+	BulkIssueStore
+	DependencyQueryStore
+	AnnotationStore
+	ConfigMetadataStore
+	CompactionStore
+	AdvancedQueryStore
+}
+
+// RawDBAccessor provides raw *sql.DB access for diagnostics and migrations.
+// Callers that need raw SQL should type-assert to this interface.
+type RawDBAccessor interface {
+	DB() *sql.DB
+	UnderlyingDB() *sql.DB
+}
+
+// StoreLocator provides filesystem path information for the store.
+// Callers that need the store's on-disk location should type-assert to this interface.
+type StoreLocator interface {
+	Path() string
+	CLIDir() string
+}
+
+// LifecycleManager provides lifecycle inspection beyond Close().
+type LifecycleManager interface {
+	IsClosed() bool
+}
+
+// PendingCommitter provides the ability to commit pending (dirty) changes.
+// Used by auto-commit and auto-push flows.
+type PendingCommitter interface {
+	CommitPending(ctx context.Context, actor string) (bool, error)
 }
 
 // Transaction provides atomic multi-operation support within a single database transaction.

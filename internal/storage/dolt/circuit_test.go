@@ -16,7 +16,14 @@ func TestCircuitBreaker_InitiallyAllows(t *testing.T) {
 	}
 }
 
+func TestMaybeNewCircuitBreaker_PortZeroDisabled(t *testing.T) {
+	if cb := maybeNewCircuitBreaker("127.0.0.1", 0); cb != nil {
+		t.Fatalf("maybeNewCircuitBreaker(0) = %#v, want nil", cb)
+	}
+}
+
 func TestCircuitBreaker_TripsAfterThreshold(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "") // need real breaker behavior
 	cb := newTestCircuitBreaker(t)
 
 	// Record failures up to threshold
@@ -74,6 +81,7 @@ func TestCircuitBreaker_SuccessResets(t *testing.T) {
 }
 
 func TestCircuitBreaker_ActiveProbeAfterCooldown_NoServer(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
 	cb := newTestCircuitBreaker(t)
 
 	// Trip the breaker
@@ -101,6 +109,7 @@ func TestCircuitBreaker_ActiveProbeAfterCooldown_NoServer(t *testing.T) {
 }
 
 func TestCircuitBreaker_ActiveProbeAfterCooldown_ServerUp(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
 	// Start a TCP listener to simulate a healthy server
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -133,6 +142,7 @@ func TestCircuitBreaker_ActiveProbeAfterCooldown_ServerUp(t *testing.T) {
 }
 
 func TestCircuitBreaker_LegacyHalfOpenState(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
 	// If a state file has half-open from an older version, the breaker
 	// should handle it gracefully via active probe.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -182,12 +192,13 @@ func TestCircuitBreaker_Reset(t *testing.T) {
 }
 
 func TestCircuitBreaker_SharedState(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
 	// Two breakers for the same port should share state via the file
 	dir := t.TempDir()
 	path := filepath.Join(dir, "circuit.json")
 
-	cb1 := &circuitBreaker{port: 99999, filePath: path}
-	cb2 := &circuitBreaker{port: 99999, filePath: path}
+	cb1 := &circuitBreaker{host: "127.0.0.1", port: 99999, filePath: path}
+	cb2 := &circuitBreaker{host: "127.0.0.1", port: 99999, filePath: path}
 
 	// Trip via cb1
 	for i := 0; i < circuitFailureThreshold; i++ {
@@ -200,6 +211,39 @@ func TestCircuitBreaker_SharedState(t *testing.T) {
 	}
 	if cb2.Allow() {
 		t.Fatal("cb2 should reject when breaker is open")
+	}
+}
+
+func TestCircuitBreaker_DifferentHostsSeparateState(t *testing.T) {
+	t.Setenv("BEADS_TEST_MODE", "")
+	// Two breakers for the same port but different hosts should have independent state.
+	// This is the core fix: previously keyed on port only, which caused cross-host blocking.
+	cb1 := newCircuitBreaker("127.0.0.1", 99999)
+	cb2 := newCircuitBreaker("10.0.0.1", 99999)
+	t.Cleanup(func() {
+		os.Remove(cb1.filePath)
+		os.Remove(cb2.filePath)
+	})
+
+	// Verify different file paths
+	if cb1.filePath == cb2.filePath {
+		t.Fatalf("different hosts should have different file paths: %s vs %s", cb1.filePath, cb2.filePath)
+	}
+
+	// Trip cb1
+	for i := 0; i < circuitFailureThreshold; i++ {
+		cb1.RecordFailure()
+	}
+	if cb1.State() != circuitOpen {
+		t.Fatal("cb1 should be open")
+	}
+
+	// cb2 should be unaffected
+	if cb2.State() != circuitClosed {
+		t.Fatalf("cb2 should be closed (independent of cb1), got %q", cb2.State())
+	}
+	if !cb2.Allow() {
+		t.Fatal("cb2 should allow requests (independent of cb1)")
 	}
 }
 
@@ -259,6 +303,7 @@ func newTestCircuitBreaker(t *testing.T) *circuitBreaker {
 	t.Helper()
 	dir := t.TempDir()
 	return &circuitBreaker{
+		host:     "127.0.0.1",
 		port:     99999,
 		filePath: filepath.Join(dir, "circuit.json"),
 	}
@@ -269,6 +314,7 @@ func newTestCircuitBreakerOnPort(t *testing.T, port int) *circuitBreaker {
 	t.Helper()
 	dir := t.TempDir()
 	return &circuitBreaker{
+		host:     "127.0.0.1",
 		port:     port,
 		filePath: filepath.Join(dir, "circuit.json"),
 	}
