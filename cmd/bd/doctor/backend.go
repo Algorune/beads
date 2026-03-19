@@ -14,12 +14,51 @@ import (
 
 var resolveBeadsDirCache sync.Map
 
+type repoRuntimeInfo struct {
+	Runtime       *beads.RepoRuntime
+	Config        *configfile.Config
+	ConfigPresent bool
+	ConfigErr     error
+}
+
+func resolveRuntimeInfoForRepo(repoPath string) *repoRuntimeInfo {
+	runtime, err := beads.ResolveRepoRuntimeFromRepoPath(repoPath)
+	if err == nil && runtime != nil {
+		cfg, cfgErr := configfile.Load(runtime.BeadsDir)
+		return &repoRuntimeInfo{
+			Runtime:       runtime,
+			Config:        effectiveConfig(cfg),
+			ConfigPresent: cfg != nil,
+			ConfigErr:     cfgErr,
+		}
+	}
+
+	beadsDir := resolveBeadsDir(filepath.Join(repoPath, ".beads"))
+	sourceBeadsDir := filepath.Join(repoPath, ".beads")
+	cfg, cfgErr := configfile.Load(beadsDir)
+	cfgEffective := effectiveConfig(cfg)
+
+	return &repoRuntimeInfo{
+		Runtime:       beads.BuildFallbackRepoRuntime(repoPath, sourceBeadsDir, beadsDir, cfgEffective),
+		Config:        cfgEffective,
+		ConfigPresent: cfg != nil,
+		ConfigErr:     cfgErr,
+	}
+}
+
+func effectiveConfig(cfg *configfile.Config) *configfile.Config {
+	if cfg != nil {
+		return cfg
+	}
+	return configfile.DefaultConfig()
+}
+
 // getBackendAndBeadsDir resolves the effective .beads directory (following redirects)
 // and returns the configured storage backend ("dolt" by default).
 func getBackendAndBeadsDir(repoPath string) (backend string, beadsDir string) {
-	runtime, err := beads.ResolveRepoRuntimeFromRepoPath(repoPath)
-	if err == nil && runtime != nil {
-		return runtime.Backend, runtime.BeadsDir
+	runtimeInfo := resolveRuntimeInfoForRepo(repoPath)
+	if runtimeInfo != nil && runtimeInfo.Runtime != nil {
+		return runtimeInfo.Runtime.Backend, runtimeInfo.Runtime.BeadsDir
 	}
 
 	beadsDir = ResolveBeadsDirForRepo(repoPath)
@@ -36,10 +75,10 @@ func ResolveBeadsDirForRepo(repoPath string) string {
 		return resolved.(string)
 	}
 
-	runtime, err := beads.ResolveRepoRuntimeFromRepoPath(repoPath)
-	if err == nil && runtime != nil {
-		resolveBeadsDirCache.Store(cacheKey, runtime.BeadsDir)
-		return runtime.BeadsDir
+	runtimeInfo := resolveRuntimeInfoForRepo(repoPath)
+	if runtimeInfo != nil && runtimeInfo.Runtime != nil {
+		resolveBeadsDirCache.Store(cacheKey, runtimeInfo.Runtime.BeadsDir)
+		return runtimeInfo.Runtime.BeadsDir
 	}
 
 	resolved := resolveBeadsDirForRepoUncached(repoPath)
